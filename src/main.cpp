@@ -1,4 +1,4 @@
-// main.cpp - UPDATED for Week 2
+// main.cpp - UPDATED for Week 3
 #include <GL/freeglut.h>
 #include <cstdlib>
 #include <ctime>
@@ -30,9 +30,11 @@ void display() {
     Renderer::setColor(1, 1, 1);
     Renderer::drawText(10, WIN_H - 20,
         "N: normal | 1 Flood  2 PortScan  3 Malware  4 Brute  5 Oversize  6 Blacklist | Space: pause  +/-: speed  R: reset  Esc: exit");
+    Renderer::drawText(10, WIN_H - 40,
+        "Click packet: inspect | Click rule or F1-F7: toggle rule | R: reset + reload config");
     if (paused) {
         Renderer::setColor(1, 0.8f, 0.1f);
-        Renderer::drawText(10, WIN_H - 40, "PAUSED");
+        Renderer::drawText(10, WIN_H - 60, "PAUSED");
     }
     glutSwapBuffers();
 }
@@ -68,6 +70,23 @@ void keyboard(unsigned char key, int, int) {
     }
 }
 
+// Week 3: mouse click = select packet (simulation area) or toggle rule (dashboard)
+void mouse(int button, int state, int mx, int my) {
+    if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
+    int gy = WIN_H - my;                       // GLUT y starts at the top, OpenGL y at the bottom
+    if (Dashboard::inPanel(mx)) {
+        int r = Dashboard::ruleAt(mx, gy);
+        if (r >= 0) net.toggleRule(r);
+    } else {
+        net.selectAt((float)mx, (float)gy);
+    }
+}
+
+// Week 3: F1..F7 toggle R1..R7
+void special(int key, int, int) {
+    if (key >= GLUT_KEY_F1 && key <= GLUT_KEY_F7) net.toggleRule(key - GLUT_KEY_F1);
+}
+
 int main(int argc, char** argv) {
     std::srand((unsigned)std::time(nullptr));
 
@@ -84,6 +103,8 @@ int main(int argc, char** argv) {
 
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
+    glutMouseFunc(mouse);
+    glutSpecialFunc(special);
     glutTimerFunc(16, timer, 0);
     glutMainLoop();
     return 0;

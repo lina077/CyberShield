@@ -23,6 +23,8 @@ class Firewall {
 public:
     std::vector<Rule> rules;               // R1..R7, checked in this order
     std::vector<std::string> blacklist;
+    std::vector<int> riskyPorts;            // R2
+    std::vector<std::string> signatures;    // R5
 
     int   maxSize         = 1500;   // R3
     int   rateLimitN      = 5;      // R4: packets per window per source
@@ -32,6 +34,8 @@ public:
     int   maxFailedLogins = 3;      // R6
 
     void init();
+    bool loadConfig(const std::string& path);   // Week 3: read config/firewall.cfg
+    const Rule* findRule(const std::string& id) const;
     Decision inspect(const Packet& p, float now);
 
 private:

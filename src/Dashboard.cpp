@@ -7,13 +7,74 @@
 namespace {
     const int PX = 910, PY = 20, PW = 360, PH = 660;   // panel rectangle
 
+    // y of the first rule row (must match the layout in Dashboard::draw)
+    float rulesTopY() { return PY + PH - 30 - 30 - 28 - (18 * 3 + 24) - 28 - 18; }
+
     void text(float x, float y, float r, float g, float b, const std::string& s) {
         Renderer::setColor(r, g, b);
         Renderer::drawText(x, y, s.c_str());
     }
 }
 
+// Week 3: packet inspector box (bottom middle of the simulation area)
+static void drawInspector(const Network& net) {
+    const int cx = 415, cy = 70, hw = 225, hh = 60;
+    Renderer::setColor(0.07f, 0.08f, 0.13f);
+    Renderer::rectFilled(cx, cy, hw, hh);
+    Renderer::setColor(0.3f, 0.35f, 0.5f);
+    Renderer::rectOutline(cx, cy, hw, hh);
+
+    float x = cx - hw + 10;
+    float y = cy + hh - 16;
+    char buf[160];
+
+    text(x, y, 1, 1, 1, "PACKET INSPECTOR");
+    y -= 18;
+
+    if (!net.hasSelected) {
+        text(x, y, 0.6f, 0.6f, 0.6f, "Click a packet to inspect it");
+        y -= 16;
+        text(x, y, 0.6f, 0.6f, 0.6f, "(press Space to pause first)");
+        return;
+    }
+
+    const Packet& p = net.selected;
+    std::string srcName = "?";
+    if (!p.path.empty()) srcName = net.nodes[p.path[0]].name;
+
+    std::snprintf(buf, sizeof(buf), "#%d  %s  %s -> %s", p.id, srcName.c_str(), p.srcIP.c_str(), p.dstIP.c_str());
+    text(x, y, 0.8f, 0.9f, 1, buf);  y -= 16;
+    std::snprintf(buf, sizeof(buf), "Port %d  %s  %d bytes", p.port, p.protocol.c_str(), p.size);
+    text(x, y, 0.8f, 0.9f, 1, buf);  y -= 16;
+    std::snprintf(buf, sizeof(buf), "Signature: %s   Failed login: %s",
+                  p.signature.empty() ? "-" : p.signature.c_str(), p.failedLogin ? "yes" : "no");
+    text(x, y, 0.8f, 0.9f, 1, buf);  y -= 16;
+
+    const char* st = "Moving";
+    float r = 0.3f, g = 0.7f, b = 1.0f;
+    switch (p.state) {
+        case ALLOWED:      st = "ALLOWED";      r = 0.3f; g = 1.0f; b = 0.4f; break;
+        case BLOCKED:      st = "BLOCKED";      r = 1.0f; g = 0.3f; b = 0.3f; break;
+        case RATE_LIMITED: st = "RATE-LIMITED"; r = 1.0f; g = 0.9f; b = 0.1f; break;
+        case DONE:         st = "finished";     r = 0.6f; g = 0.6f; b = 0.6f; break;
+        default: break;
+    }
+    std::snprintf(buf, sizeof(buf), "State: %s%s", st, net.selectedGone ? " (gone from network)" : "");
+    text(x, y, r, g, b, buf);  y -= 16;
+
+    if (p.matchedRule.empty()) {
+        text(x, y, 0.7f, 0.7f, 0.7f, "Rule: not inspected yet (before firewall)");
+        return;
+    }
+    const Rule* rule = net.firewall.findRule(p.matchedRule);
+    std::snprintf(buf, sizeof(buf), "Rule: %s - %s", p.matchedRule.c_str(), rule ? rule->description.c_str() : "");
+    text(x, y, 1, 1, 1, buf);  y -= 16;
+    std::snprintf(buf, sizeof(buf), "Threat: %s", p.threat.c_str());
+    text(x, y, r, g, b, buf);
+}
+
 void Dashboard::draw(const Network& net, const AttackGenerator& atk) {
+    drawInspector(net);
     // panel background + border
     Renderer::setColor(0.07f, 0.08f, 0.13f);
     Renderer::rectFilled(PX + PW / 2, PY + PH / 2, PW / 2, PH / 2);
@@ -54,7 +115,7 @@ void Dashboard::draw(const Network& net, const AttackGenerator& atk) {
     y -= 28;
 
     // firewall rules
-    text(x, y, 1, 1, 1, "FIREWALL RULES");
+    text(x, y, 1, 1, 1, "FIREWALL RULES  (click / F1-F7)");
     y -= 18;
     for (const auto& r : net.firewall.rules) {
         std::snprintf(buf, sizeof(buf), "%s %-3s %s", r.id.c_str(), r.enabled ? "ON" : "OFF", r.description.c_str());
@@ -74,4 +135,15 @@ void Dashboard::draw(const Network& net, const AttackGenerator& atk) {
         text(x, y, it->r, it->g, it->b, s);
         y -= 16;
     }
+}
+
+bool Dashboard::inPanel(int mx) { return mx >= PX; }
+
+int Dashboard::ruleAt(int mx, int myGL) {
+    if (mx < PX || mx > PX + PW) return -1;
+    for (int i = 0; i < 7; i++) {
+        float rowY = rulesTopY() - 16.0f * i;
+        if (myGL >= rowY - 5 && myGL <= rowY + 11) return i;
+    }
+    return -1;
 }

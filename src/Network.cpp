@@ -1,4 +1,4 @@
-// Network.cpp - UPDATED for Week 2
+// Network.cpp - UPDATED for Week 3
 #include "Network.h"
 #include "Renderer.h"
 #include <cmath>
@@ -13,6 +13,9 @@ void Network::init() {
     packets.clear();
     log.clear();
     firewall.init();
+    configLoaded = firewall.loadConfig("config/firewall.cfg");   // run the exe from the project folder
+    nextId = 1;
+    hasSelected = selectedGone = false;
 
     totalPackets = allowedCount = blockedCount = rateLimitedCount = 0;
     simTime = 0;
@@ -30,6 +33,8 @@ void Network::init() {
     links.push_back({FIREWALL_IDX, INTERNAL_IDX});
 
     log.add("Simulation started", 0.7f, 0.7f, 0.7f);
+    if (configLoaded) log.add("Config loaded: config/firewall.cfg", 0.7f, 0.7f, 0.7f);
+    else              log.add("No config file, using defaults", 0.7f, 0.7f, 0.5f);
 }
 
 void Network::reset() { init(); }
@@ -53,7 +58,39 @@ Packet Network::createPacket(int client, int dest) {
     return p;
 }
 
-void Network::spawnPacket(const Packet& p) { packets.push_back(p); }
+void Network::spawnPacket(const Packet& p) {
+    Packet q = p;
+    q.id = nextId++;
+    packets.push_back(q);
+}
+
+// click -> pick the closest packet within 15 px (or clear the selection)
+void Network::selectAt(float x, float y) {
+    int best = -1;
+    float bestD = 15.0f * 15.0f;
+    for (size_t i = 0; i < packets.size(); i++) {
+        float dx = packets[i].x - x, dy = packets[i].y - y;
+        float d = dx * dx + dy * dy;
+        if (d <= bestD) { bestD = d; best = (int)i; }
+    }
+    if (best >= 0) {
+        selected = packets[best];
+        hasSelected = true;
+        selectedGone = false;
+    } else {
+        hasSelected = false;
+    }
+}
+
+void Network::toggleRule(int i) {
+    if (i < 0 || i >= 6) return;          // R7 (default allow) cannot be switched off
+    Rule& r = firewall.rules[i];
+    r.enabled = !r.enabled;
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "RULE %s %s: %s", r.id.c_str(),
+                  r.enabled ? "ENABLED" : "DISABLED", r.description.c_str());
+    log.add(buf, 0.6f, 0.8f, 1.0f);
+}
 
 void Network::sendNormalPacket() {
     int c = std::rand() % 6;
@@ -136,6 +173,20 @@ void Network::update(float dt) {
         }
     }
 
+    // keep the inspector's copy in sync with the live packet
+    if (hasSelected && !selectedGone) {
+        bool found = false;
+        for (const auto& p : packets) {
+            if (p.id == selected.id) {
+                selected = p;
+                found = true;
+                if (p.state == DONE) selectedGone = true;
+                break;
+            }
+        }
+        if (!found) selectedGone = true;
+    }
+
     packets.erase(std::remove_if(packets.begin(), packets.end(),
                   [](const Packet& p) { return p.state == DONE; }),
                   packets.end());
@@ -194,4 +245,9 @@ void Network::draw() const {
     }
     for (const auto& n : nodes) drawNode(n);
     for (const auto& p : packets) drawPacket(p);
+
+    if (hasSelected && !selectedGone) {     // selection ring
+        Renderer::setColor(1, 1, 1);
+        Renderer::circleMidpoint((int)selected.x, (int)selected.y, 14);
+    }
 }

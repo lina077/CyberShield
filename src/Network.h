@@ -1,4 +1,4 @@
-// Network.h - UPDATED for Week 2
+// Network.h - UPDATED for Week 3
 #pragma once
 #include <vector>
 #include <utility>
@@ -29,6 +29,13 @@ public:
     int blockedCount = 0;
     int rateLimitedCount = 0;
 
+    // Week 3: packet inspector (click a packet to select it)
+    int    nextId = 1;
+    bool   hasSelected = false;   // something is selected
+    bool   selectedGone = false;  // selected packet already finished / was removed
+    Packet selected;              // copy of the selected packet (kept after it disappears)
+    bool   configLoaded = false;
+
     float simTime = 0;
     float threatLevel = 0;      // rises on block/rate-limit, decays over time
 
@@ -42,6 +49,9 @@ public:
     void sendNormalPacket();
 
     SecurityStatus status() const;
+
+    void selectAt(float x, float y);   // click on the simulation area
+    void toggleRule(int index);        // enable / disable R1..R6 at runtime
 
 private:
     void drawNode(const Node& n) const;

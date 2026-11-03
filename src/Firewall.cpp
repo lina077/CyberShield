@@ -1,6 +1,8 @@
 // Firewall.cpp
 #include "Firewall.h"
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 
 void Firewall::init() {
     rules = {
@@ -13,6 +15,10 @@ void Firewall::init() {
         {"R7", "Everything else: ALLOW",         true},
     };
     blacklist = {"66.66.66.66"};
+    riskyPorts = {23, 445, 3389};
+    signatures = {"MALWARE-X1", "TROJAN-77", "EVIL-PAYLOAD"};
+    maxSize = 1500; rateLimitN = 5; windowSec = 1.0f;
+    banStrikes = 6; banSeconds = 10.0f; maxFailedLogins = 3;
     sources.clear();
     failedLogins.clear();
 }
@@ -22,7 +28,7 @@ bool Firewall::isBlacklisted(const std::string& ip) const {
 }
 
 bool Firewall::isKnownSignature(const std::string& sig) const {
-    return sig == "MALWARE-X1" || sig == "TROJAN-77" || sig == "EVIL-PAYLOAD";
+    return std::find(signatures.begin(), signatures.end(), sig) != signatures.end();
 }
 
 Decision Firewall::inspect(const Packet& p, float now) {
@@ -31,7 +37,7 @@ Decision Firewall::inspect(const Packet& p, float now) {
         return {ACT_BLOCK, "R1", "Blacklisted host"};
 
     // R2: risky destination ports
-    if (rules[1].enabled && (p.port == 23 || p.port == 445 || p.port == 3389))
+    if (rules[1].enabled && std::find(riskyPorts.begin(), riskyPorts.end(), p.port) != riskyPorts.end())
         return {ACT_BLOCK, "R2", "Port scan / risky service"};
 
     // R3: oversized packet
@@ -72,4 +78,65 @@ Decision Firewall::inspect(const Packet& p, float now) {
 
     // R7: default
     return {ACT_ALLOW, "R7", "Normal traffic"};
+}
+
+const Rule* Firewall::findRule(const std::string& id) const {
+    for (const auto& r : rules) if (r.id == id) return &r;
+    return nullptr;
+}
+
+// ---------- Week 3: config file ----------
+static std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+static std::vector<std::string> splitList(const std::string& s) {
+    std::vector<std::string> out;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item = trim(item);
+        if (!item.empty()) out.push_back(item);
+    }
+    return out;
+}
+
+// Format: key = value, one per line. Lines starting with # are comments.
+// Returns false if the file could not be opened (defaults stay in use).
+bool Firewall::loadConfig(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) return false;
+
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = trim(line.substr(0, eq));
+        std::string val = trim(line.substr(eq + 1));
+
+        try {
+            if      (key == "maxSize")         maxSize = std::stoi(val);
+            else if (key == "rateLimitN")      rateLimitN = std::stoi(val);
+            else if (key == "windowSec")       windowSec = std::stof(val);
+            else if (key == "banStrikes")      banStrikes = std::stoi(val);
+            else if (key == "banSeconds")      banSeconds = std::stof(val);
+            else if (key == "maxFailedLogins") maxFailedLogins = std::stoi(val);
+            else if (key == "blacklist")       blacklist = splitList(val);
+            else if (key == "signatures")      signatures = splitList(val);
+            else if (key == "ports") {
+                riskyPorts.clear();
+                for (const auto& t : splitList(val)) riskyPorts.push_back(std::stoi(t));
+            }
+            else if (key.size() == 2 && key[0] == 'R') {          // R1=on / R3=off
+                for (auto& r : rules)
+                    if (r.id == key) r.enabled = (val == "on" || val == "1" || val == "true");
+            }
+        } catch (...) { /* bad number: ignore that line */ }
+    }
+    return true;
 }
