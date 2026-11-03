@@ -1,7 +1,8 @@
-// Network.cpp - Person B
+// Network.cpp - UPDATED for Week 2
 #include "Network.h"
 #include "Renderer.h"
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <algorithm>
@@ -10,54 +11,111 @@ void Network::init() {
     nodes.clear();
     links.clear();
     packets.clear();
-    totalPackets = 0;
+    log.clear();
+    firewall.init();
 
-    // 6 clients on the left
+    totalPackets = allowedCount = blockedCount = rateLimitedCount = 0;
+    simTime = 0;
+    threatLevel = 0;
+
     for (int i = 0; i < 6; i++) {
         nodes.push_back({100.0f, 120.0f + i * 90.0f, CLIENT, "PC-" + std::to_string(i + 1)});
     }
-    nodes.push_back({450.0f, 350.0f, FIREWALL, "Firewall"});         // 6
-    nodes.push_back({800.0f, 520.0f, DMZ_SERVER, "DMZ Web Server"}); // 7
-    nodes.push_back({800.0f, 180.0f, INTERNAL_SERVER, "Internal DB"}); // 8
+    nodes.push_back({450.0f, 350.0f, FIREWALL, "Firewall"});             // 6
+    nodes.push_back({800.0f, 520.0f, DMZ_SERVER, "DMZ Web Server"});     // 7
+    nodes.push_back({800.0f, 180.0f, INTERNAL_SERVER, "Internal DB"});   // 8
 
     for (int i = 0; i < 6; i++) links.push_back({i, FIREWALL_IDX});
     links.push_back({FIREWALL_IDX, DMZ_IDX});
     links.push_back({FIREWALL_IDX, INTERNAL_IDX});
+
+    log.add("Simulation started", 0.7f, 0.7f, 0.7f);
 }
 
 void Network::reset() { init(); }
 
-void Network::sendNormalPacket() {
+Packet Network::createPacket(int client, int dest) {
     Packet p;
-    int c = std::rand() % 6;
-    bool toDMZ = (std::rand() % 2 == 0);
-    int dest = toDMZ ? DMZ_IDX : INTERNAL_IDX;
+    bool toDMZ = (dest == DMZ_IDX);
 
-    p.srcIP = "192.168.1." + std::to_string(10 + c);
+    p.srcIP = "192.168.1." + std::to_string(10 + client);
     p.dstIP = toDMZ ? "10.0.0.80" : "10.0.1.5";
     p.port = toDMZ ? ((std::rand() % 2) ? 80 : 443) : 3306;
     p.protocol = "TCP";
     p.size = 200 + std::rand() % 800;
     p.signature = "";
-    p.x = nodes[c].x;
-    p.y = nodes[c].y;
+    p.x = nodes[client].x;
+    p.y = nodes[client].y;
     p.speed = 220.0f;
-    p.path = {c, FIREWALL_IDX, dest};
+    p.path = {client, FIREWALL_IDX, dest};
     p.pathIdx = 0;
     p.state = MOVING;
-
-    packets.push_back(p);
-    totalPackets++;
+    return p;
 }
 
-// Week 2: decide ALLOW / BLOCK / RATE_LIMIT here.
+void Network::spawnPacket(const Packet& p) { packets.push_back(p); }
+
+void Network::sendNormalPacket() {
+    int c = std::rand() % 6;
+    int dest = (std::rand() % 2 == 0) ? DMZ_IDX : INTERNAL_IDX;
+    spawnPacket(createPacket(c, dest));
+}
+
+SecurityStatus Network::status() const {
+    if (threatLevel >= 8.0f) return STATUS_CRITICAL;
+    if (threatLevel >= 2.5f) return STATUS_WARNING;
+    return STATUS_SAFE;
+}
+
+// Firewall check: runs once when a packet reaches the firewall node
 void Network::onReachFirewall(Packet& p) {
-    (void)p; // for now every packet is allowed
+    Decision d = firewall.inspect(p, simTime);
+    p.matchedRule = d.ruleId;
+    p.threat = d.threat;
+    totalPackets++;
+
+    const char* word = "ALLOW";
+    float r = 0.3f, g = 1.0f, b = 0.4f;
+
+    switch (d.action) {
+        case ACT_ALLOW:
+            p.state = ALLOWED;
+            allowedCount++;
+            break;
+        case ACT_BLOCK:
+            p.state = BLOCKED;
+            p.timer = 0.8f;          // stays visible for a moment, then disappears
+            blockedCount++;
+            threatLevel += 1.0f;
+            word = "BLOCK"; r = 1.0f; g = 0.25f; b = 0.25f;
+            break;
+        case ACT_RATE_LIMIT:
+            p.state = RATE_LIMITED;
+            p.speed *= 0.35f;        // throttled: moves slowly
+            rateLimitedCount++;
+            threatLevel += 1.0f;
+            word = "LIMIT"; r = 1.0f; g = 0.9f; b = 0.1f;
+            break;
+    }
+
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "[%4.1fs] %s %s:%d %s %s",
+                  simTime, word, p.srcIP.c_str(), p.port,
+                  d.ruleId.c_str(), d.threat.c_str());
+    log.add(buf, r, g, b);
 }
 
 void Network::update(float dt) {
+    simTime += dt;
+    threatLevel = std::max(0.0f, threatLevel - dt * 1.0f);
+
     for (auto& p : packets) {
-        if (p.state != MOVING) continue;
+        if (p.state == BLOCKED) {            // blocked packets stop at the firewall
+            p.timer -= dt;
+            if (p.timer <= 0) p.state = DONE;
+            continue;
+        }
+        if (p.state == DONE) continue;
 
         const Node& target = nodes[p.path[p.pathIdx + 1]];
         float dx = target.x - p.x;
@@ -66,15 +124,13 @@ void Network::update(float dt) {
         float step = p.speed * dt;
 
         if (dist <= step) {
-            // reached the next node
             p.x = target.x;
             p.y = target.y;
             p.pathIdx++;
 
             if (p.path[p.pathIdx] == FIREWALL_IDX) onReachFirewall(p);
-            if (p.pathIdx == (int)p.path.size() - 1) p.state = DONE;
+            if (p.state != BLOCKED && p.pathIdx == (int)p.path.size() - 1) p.state = DONE;
         } else {
-            // translation towards the target
             p.x += dx / dist * step;
             p.y += dy / dist * step;
         }
@@ -107,13 +163,30 @@ void Network::drawNode(const Node& n) const {
     Renderer::drawText(n.x - 25, n.y - std::max(hw, hh) - 28, n.name.c_str());
 }
 
+// colour coding: normal = blue/green, suspicious = orange, rate-limited = yellow, blocked = red
 void Network::drawPacket(const Packet& p) const {
-    Renderer::setColor(0.2f, 1.0f, 0.3f);
-    Renderer::rectFilled((int)p.x, (int)p.y, 6, 6);
+    float r, g, b;
+    int half = 6;
+    switch (p.state) {
+        case BLOCKED:      r = 1.0f; g = 0.15f; b = 0.15f; half = 9; break;
+        case RATE_LIMITED: r = 1.0f; g = 0.9f;  b = 0.1f;  break;
+        case ALLOWED:      r = 0.2f; g = 1.0f;  b = 0.3f;  break;
+        default:
+            if (p.isAttack) { r = 1.0f; g = 0.55f; b = 0.1f; }   // suspicious
+            else            { r = 0.3f; g = 0.7f;  b = 1.0f; }   // normal
+    }
+    Renderer::setColor(r, g, b);
+    Renderer::rectFilled((int)p.x, (int)p.y, half, half);
+
+    if (p.state == BLOCKED) {   // draw an X with Bresenham
+        int x = (int)p.x, y = (int)p.y;
+        Renderer::setColor(1, 1, 1);
+        Renderer::lineBresenham(x - half, y - half, x + half, y + half);
+        Renderer::lineBresenham(x - half, y + half, x + half, y - half);
+    }
 }
 
 void Network::draw() const {
-    // connections (DDA/Bresenham)
     Renderer::setColor(0.35f, 0.4f, 0.5f);
     for (const auto& l : links) {
         Renderer::lineBresenham((int)nodes[l.first].x, (int)nodes[l.first].y,
