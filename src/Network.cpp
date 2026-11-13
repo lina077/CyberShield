@@ -1,6 +1,7 @@
-// Network.cpp - UPDATED for Week 3
+// Network.cpp - UPDATED for Week 4 (Week 3 code kept as is; new lines marked NEW)
 #include "Network.h"
 #include "Renderer.h"
+#include "Effects.h"          // NEW
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,7 @@ void Network::init() {
     packets.clear();
     log.clear();
     firewall.init();
+    challenge.stop();         // NEW
     configLoaded = firewall.loadConfig("config/firewall.cfg");   // run the exe from the project folder
     nextId = 1;
     hasSelected = selectedGone = false;
@@ -140,6 +142,8 @@ void Network::onReachFirewall(Packet& p) {
                   simTime, word, p.srcIP.c_str(), p.port,
                   d.ruleId.c_str(), d.threat.c_str());
     log.add(buf, r, g, b);
+
+    challenge.onDecision(p, d.action);     // NEW: Defender Challenge scoring
 }
 
 void Network::update(float dt) {
@@ -203,6 +207,8 @@ void Network::drawNode(const Node& n) const {
     }
     int x = (int)n.x, y = (int)n.y;
 
+    Effects::drawGlow(n.x, n.y, (float)(std::max(hw, hh) + 35), r, g, b, 0.7f);   // NEW
+
     Renderer::setColor(r * 0.25f, g * 0.25f, b * 0.25f);
     Renderer::rectFilled(x, y, hw, hh);
 
@@ -226,6 +232,13 @@ void Network::drawPacket(const Packet& p) const {
             if (p.isAttack) { r = 1.0f; g = 0.55f; b = 0.1f; }   // suspicious
             else            { r = 0.3f; g = 0.7f;  b = 1.0f; }   // normal
     }
+
+    // NEW: fading trail behind a moving packet
+    if (p.state != BLOCKED && p.pathIdx + 1 < (int)p.path.size()) {
+        const Node& tgt = nodes[p.path[p.pathIdx + 1]];
+        Effects::drawTrail(p.x, p.y, tgt.x - p.x, tgt.y - p.y, r, g, b);
+    }
+
     Renderer::setColor(r, g, b);
     Renderer::rectFilled((int)p.x, (int)p.y, half, half);
 
@@ -238,12 +251,20 @@ void Network::drawPacket(const Packet& p) const {
 }
 
 void Network::draw() const {
+    const Node& fw = nodes[FIREWALL_IDX];
+    Effects::drawFirewallBack(fw.x, fw.y);          // NEW: glow + rotating radar
+
     Renderer::setColor(0.35f, 0.4f, 0.5f);
     for (const auto& l : links) {
         Renderer::lineBresenham((int)nodes[l.first].x, (int)nodes[l.first].y,
                                 (int)nodes[l.second].x, (int)nodes[l.second].y);
     }
     for (const auto& n : nodes) drawNode(n);
+
+    Effects::drawFirewallShield(fw.x, fw.y);        // NEW: pulsing shield on the firewall
+    if (status() != STATUS_SAFE)                    // NEW: warning triangle
+        Effects::drawWarningTriangle(fw.x, fw.y + 95, 22, status() == STATUS_CRITICAL);
+
     for (const auto& p : packets) drawPacket(p);
 
     if (hasSelected && !selectedGone) {     // selection ring

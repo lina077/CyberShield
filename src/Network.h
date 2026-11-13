@@ -1,4 +1,4 @@
-// Network.h - UPDATED for Week 3
+// Network.h - UPDATED for Week 4 (Week 3 code kept as is)
 #pragma once
 #include <vector>
 #include <utility>
@@ -6,6 +6,7 @@
 #include "Packet.h"
 #include "Firewall.h"
 #include "Logger.h"
+#include "Challenge.h"        // NEW
 
 enum SecurityStatus { STATUS_SAFE, STATUS_WARNING, STATUS_CRITICAL };
 
@@ -22,6 +23,7 @@ public:
 
     Firewall firewall;
     EventLog log;
+    Challenge challenge;      // NEW: Defender Challenge mode
 
     // statistics (counted when a packet reaches the firewall)
     int totalPackets = 0;

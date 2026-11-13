@@ -1,5 +1,6 @@
 // Dashboard.cpp
 #include "Dashboard.h"
+#include "Graph.h"
 #include "Renderer.h"
 #include <cstdio>
 #include <string>
@@ -125,16 +126,19 @@ void Dashboard::draw(const Network& net, const AttackGenerator& atk) {
     }
     y -= 14;
 
-    // event log (newest first)
+    // event log (newest first) - stops above the traffic graph
     text(x, y, 1, 1, 1, "EVENT LOG");
     y -= 18;
     for (auto it = net.log.entries.rbegin(); it != net.log.entries.rend(); ++it) {
-        if (y < PY + 10) break;
+        if (y < PY + 150) break;                       // CHANGED: was PY + 10
         std::string s = it->text;
         if (s.size() > 50) s = s.substr(0, 50);
         text(x, y, it->r, it->g, it->b, s);
         y -= 16;
     }
+
+    // NEW: live traffic graph at the bottom of the panel
+    Graph::draw(PX + 15, PY + 10, PW - 30, 130);
 }
 
 bool Dashboard::inPanel(int mx) { return mx >= PX; }
